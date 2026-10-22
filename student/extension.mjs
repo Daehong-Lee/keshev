@@ -127,13 +127,20 @@ export function createStudentView() {
           unknown: '확인 불가(unknown)',
         };
         const rawDecision = typeof data.decision === 'string' ? data.decision : String(data.decision ?? '없음');
-        const decisionLabel = decisions[rawDecision] || `확인 불가(${rawDecision})`;
+        const isKnownDecision = Object.hasOwn(decisions, rawDecision);
+        const decisionLabel = isKnownDecision ? decisions[rawDecision] : decisions.unknown;
         addText(`업무 앱 ID: ${data.appId ?? appId ?? '확인 불가'}`);
         addText(`접속 판정: ${decisionLabel}`);
         addText(`판정 이유: ${typeof data.reason === 'string' ? data.reason : '제공되지 않았습니다.'}`);
         addText(`확인 시각: ${typeof data.checkedAt === 'string' ? data.checkedAt : '제공되지 않았습니다.'}`);
-        if (rawDecision === 'unknown' || !Object.hasOwn(decisions, rawDecision)) {
+        if (rawDecision === 'challenge') {
+          addText('별도의 확인 절차가 필요합니다. 이 화면은 확인 절차를 대신 수행하지 않습니다.');
+        }
+        if (rawDecision === 'unknown' || !isKnownDecision) {
           addText('확인 불가 상태를 허용으로 간주하지 마세요.');
+        }
+        if (!isKnownDecision) {
+          addText(`참고: 서버가 반환한 판정 코드: ${rawDecision}`);
         }
       } else {
         addText('접속 판정 상태를 확인할 수 없습니다. 허용으로 간주하지 마세요.');
