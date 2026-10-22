@@ -184,9 +184,9 @@ export function createStudentView() {
 
       const kindLabels = { access: '접속 기록', xdr: 'XDR 경보' };
       const stateLabels = {
-        access: { allowed: '허용', denied: '거부', unknown: '확인 불가' },
+        access: { allowed: '접근 허용', denied: '접근 거부', unknown: '확인 불가' },
         session: { active: '활성', expired: '만료', revoked: '철회됨', unknown: '확인 불가' },
-        device: { compliant: '기준 충족', noncompliant: '기준 미충족', unknown: '확인 불가' },
+        device: { compliant: '보안 기준 충족', noncompliant: '보안 기준 미충족', unknown: '확인 불가' },
       };
       const filters = document.createElement('div');
       const createFilter = (key, labelText, values, labelForValue) => {
@@ -218,27 +218,24 @@ export function createStudentView() {
       const accessFilter = createFilter('access', '접속 상태', accessStates, (value) => `${stateLabels.access[value] || '확인 불가'}(${value})`);
       root.append(filters);
 
+      // 정렬은 복사본에만 적용해 전달받은 배열과 서버 데이터를 변경하지 않습니다.
+      const ordered = data.slice().sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
       const list = document.createElement('div');
-      const ordered = data
-        .map((event, index) => ({ event, index }))
-        .sort((left, right) => Date.parse(right.event.at) - Date.parse(left.event.at) || left.index - right.index);
-      const rawState = (kind, value) => `${stateLabels[kind]?.[value] || '확인 불가'}(${value ?? 'unknown'})`;
-      const renderRows = () => {
-        list.replaceChildren();
-        if (data.length === 0) {
-          addText(list, '표시할 기록이 없습니다.');
-          return;
-        }
-        const visible = ordered.filter(({ event }) =>
-          (kindFilter.value === 'all' || event.kind === kindFilter.value)
-          && (appFilter.value === 'all' || event.appId === appFilter.value)
-          && (accessFilter.value === 'all' || event.state?.access === accessFilter.value));
-        if (visible.length === 0) {
-          addText(list, '선택한 조건에 맞는 기록이 없습니다.');
-          return;
-        }
+      const rawState = (kind, value) => {
+        const raw = typeof value === 'string' ? value : 'unknown';
+        return `${stateLabels[kind]?.[raw] || '확인 불가'}(${raw})`;
+      };
+      const rows = [];
+      const noMatches = document.createElement('p');
+      noMatches.textContent = '선택한 조건에 맞는 기록이 없습니다.';
+      noMatches.hidden = true;
 
-        visible.forEach(({ event }, index) => {
+      if (ordered.length === 0) {
+        addText(list, '표시할 기록이 없습니다.');
+      } else {
+        // 행과 상세 DOM은 한 번만 만듭니다. 필터 변경 때 목록을 비웠다 다시 만들지 않고
+        // 행의 hidden 상태만 바꿔 깜박임과 열린 상세의 불필요한 초기화를 막습니다.
+        ordered.forEach((event, index) => {
           const row = document.createElement('article');
           row.setAttribute('data-student-event-id', event.id);
           addText(row, `사건 ID: ${event.id}`);
@@ -277,13 +274,36 @@ export function createStudentView() {
           button.setAttribute('aria-controls', detail.id);
           button.addEventListener('click', () => {
             const expanded = button.getAttribute('aria-expanded') === 'true';
+            for (const otherButton of list.querySelectorAll('button[aria-expanded="true"]')) {
+              if (otherButton !== button) {
+                otherButton.setAttribute('aria-expanded', 'false');
+                otherButton.textContent = '상세 보기';
+                const otherDetail = document.getElementById(otherButton.getAttribute('aria-controls'));
+                if (otherDetail) otherDetail.hidden = true;
+              }
+            }
             button.setAttribute('aria-expanded', String(!expanded));
             button.textContent = expanded ? '상세 보기' : '상세 닫기';
             detail.hidden = expanded;
           });
           row.append(button, detail);
           list.append(row);
+          rows.push({ event, row });
         });
+        list.append(noMatches);
+      }
+
+      const renderRows = () => {
+        if (ordered.length === 0) return;
+        let visibleCount = 0;
+        for (const { event, row } of rows) {
+          const matches = (kindFilter.value === 'all' || event.kind === kindFilter.value)
+            && (appFilter.value === 'all' || event.appId === appFilter.value)
+            && (accessFilter.value === 'all' || event.state?.access === accessFilter.value);
+          row.hidden = !matches;
+          if (matches) visibleCount += 1;
+        }
+        noMatches.hidden = visibleCount !== 0;
       };
 
       kindFilter.addEventListener('change', renderRows);
