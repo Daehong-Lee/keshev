@@ -503,7 +503,129 @@ export function createStudentView() {
 
       return root;
     },
-    renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
+    renderVulnerabilities({ status, mode, data, error } = {}) {
+      const root = document.createElement('section');
+      root.setAttribute('data-state', ['idle', 'loading', 'error', 'ok'].includes(status) ? status : 'error');
+
+      const addText = (parent, tag, text) => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        parent.append(node);
+        return node;
+      };
+      const display = (value) => {
+        if (typeof value === 'string' && value.length > 0) return value;
+        if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+        return '제공되지 않음';
+      };
+      const modeLabels = {
+        connected: '연결됨(connected)',
+        demo: '예제 자료(demo) · 실제 운영 조회 아님',
+        disconnected: '연결 없음(disconnected)',
+        unknown: '연결 상태 확인 불가(unknown)',
+      };
+      if (modeLabels[mode]) addText(root, 'p', modeLabels[mode]);
+
+      if (status === 'idle') {
+        addText(root, 'p', '조회 전');
+        return root;
+      }
+      if (status === 'loading') {
+        addText(root, 'p', '조회 중');
+        return root;
+      }
+      if (status === 'error') {
+        const message = typeof error?.message === 'string' && error.message.length > 0
+          ? error.message
+          : '오류 메시지가 제공되지 않았습니다.';
+        addText(root, 'p', `조회 실패: ${message}`);
+        addText(root, 'p', '조회 실패는 취약점 없음이 아닙니다. 이전 조회 표를 현재 결과로 표시하지 않습니다.');
+        return root;
+      }
+      if (status !== 'ok' || !data || typeof data !== 'object' || Array.isArray(data)) {
+        root.setAttribute('data-state', 'error');
+        addText(root, 'p', '조회 결과 형식을 확인할 수 없습니다. 취약점 없음으로 간주하지 마세요.');
+        return root;
+      }
+
+      const overallLabels = {
+        complete: '모두 조회(complete)',
+        partial: '일부 조회 실패(partial)',
+        not_checked: '아직 조회 안 함(not_checked)',
+        not_configured: '조회 준비 미완료(not_configured)',
+        unverifiable: 'lock 파일 확인 불가(unverifiable)',
+      };
+      const overallStatus = typeof data.status === 'string' ? data.status : '확인 불가';
+      addText(root, 'p', `전체 조회 상태: ${overallLabels[overallStatus] || `확인 불가(${overallStatus})`}`);
+      addText(root, 'p', '조회 대상은 package-lock.json에 기록된 정확한 버전과 설치된 node_modules의 패키지 메타데이터를 대조해 확인합니다. 버전 범위는 설치 버전으로 사용하지 않습니다.');
+
+      if (overallStatus === 'not_configured') {
+        addText(root, 'p', '조회 대상 프로젝트 설정이 필요합니다. 대상 경로와 허용 패키지는 운영자가 준비하며, 학생이 임의로 설정을 변경하지 않습니다.');
+      } else if (overallStatus === 'not_checked') {
+        addText(root, 'p', '승인된 공개 조회 대상 패키지가 없어 아직 조회하지 않았습니다. 이는 취약점 없음이 아닙니다.');
+      } else if (overallStatus === 'unverifiable') {
+        addText(root, 'p', '잠금 파일을 확인할 수 없어 설치 버전 대조를 검증하지 못했습니다.');
+      } else if (overallStatus === 'partial') {
+        addText(root, 'p', '일부 패키지 조회에 실패했습니다. 확인된 패키지의 취약점 ID는 유지하며, 실패한 조회를 취약점 없음으로 표시하지 않습니다.');
+      }
+
+      const addFieldIfProvided = (label, value) => {
+        if (value !== undefined && value !== null) addText(root, 'p', `${label}: ${display(value)}`);
+      };
+      addFieldIfProvided('lockfileVersion', data.lockfileVersion);
+      addFieldIfProvided('lockfileHash', data.lockfileHash);
+      addFieldIfProvided('전체 확인 시각(checkedAt)', data.checkedAt);
+
+      const packageLabels = {
+        known_vulnerabilities: '알려진 항목 있음(known_vulnerabilities)',
+        none_found: '알려진 항목 없음(none_found)',
+        unverifiable: '조회 확인 불가(unverifiable)',
+      };
+      const packages = Array.isArray(data.packages) ? data.packages : [];
+      if (packages.length === 0) {
+        addText(root, 'p', '표시할 패키지 조회 결과가 없습니다.');
+      } else {
+        const table = document.createElement('table');
+        const head = document.createElement('thead');
+        const headingRow = document.createElement('tr');
+        for (const label of ['패키지', '정확한 설치 버전', '조회 상태', '출처', '패키지 확인 시각', '취약점 ID', '수정 시각(modified)']) {
+          addText(headingRow, 'th', label);
+        }
+        head.append(headingRow);
+        table.append(head);
+        const body = document.createElement('tbody');
+
+        for (const pkg of packages) {
+          if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) continue;
+          const vulnerabilities = Array.isArray(pkg.vulnerabilities) ? pkg.vulnerabilities : [];
+          const rows = vulnerabilities.length > 0 ? vulnerabilities : [null];
+          for (const finding of rows) {
+            const row = document.createElement('tr');
+            const packageName = typeof pkg.name === 'string' ? pkg.name : '';
+            const packageVersion = typeof pkg.version === 'string' ? pkg.version : '';
+            row.setAttribute('data-student-package-name', packageName);
+            row.setAttribute('data-student-package-version', packageVersion);
+            addText(row, 'td', packageName || '확인 불가');
+            addText(row, 'td', packageVersion || '확인 불가');
+            const packageStatus = typeof pkg.status === 'string' ? pkg.status : '확인 불가';
+            const packageStatusText = pkg.status === 'unverifiable' && vulnerabilities.length > 0
+              ? `일부 확인·전체 조회 확인 불가(${packageStatus})`
+              : (packageLabels[packageStatus] || `확인 불가(${packageStatus})`);
+            addText(row, 'td', packageStatusText);
+            addText(row, 'td', pkg.source == null ? '제공되지 않음' : display(pkg.source));
+            addText(row, 'td', pkg.checkedAt == null ? '제공되지 않음' : display(pkg.checkedAt));
+            addText(row, 'td', finding && typeof finding.id === 'string' ? finding.id : '');
+            addText(row, 'td', finding && finding.modified != null ? display(finding.modified) : '');
+            body.append(row);
+          }
+        }
+        table.append(body);
+        root.append(table);
+      }
+
+      addText(root, 'p', 'none_found는 조회 범위에서 알려진 취약점 항목을 찾지 못했다는 뜻입니다. 조회 결과가 없다는 사실만으로 패키지나 앱 전체가 안전하다고 보장할 수 없습니다.');
+      return root;
+    },
     renderAiConnection({ status, mode, data, error, checkedAt, explanationAccepted } = {}) {
       const root = document.createElement('section');
       const heading = document.createElement('h2');
